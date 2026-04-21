@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "https://safeguard.ai",
-        "https://safeguard-ai-platform.vercel.app",
+        "https://safeguard-ai-omega.vercel.app",
     ]
 
                                                                    

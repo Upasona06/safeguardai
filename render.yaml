@@ -37,7 +37,7 @@ services:
 
       # CORS
       - key: ALLOWED_ORIGINS
-        value: '["https://safeguard-ai-frontend.onrender.com","https://safeguard-ai-platform.vercel.app"]'
+        value: '["https://safeguard-ai-frontend.onrender.com","https://safeguard-ai-omega.vercel.app"]'
 
       # OCR + file paths
       - key: FIR_OUTPUT_DIR
