@@ -1,0 +1,143 @@
+services:
+  - type: web
+    name: safeguard-ai-backend
+    env: docker
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+
+      # Data stores
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: safeguard_ai
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: safeguard-ai-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: safeguard-ai-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: safeguard-ai-redis
+          property: connectionString
+
+      # CORS
+      - key: ALLOWED_ORIGINS
+        value: '["https://safeguard-ai-frontend.onrender.com","https://safeguard-ai-platform.vercel.app"]'
+
+      # OCR + file paths
+      - key: FIR_OUTPUT_DIR
+        value: /tmp/fir_pdfs
+
+      # Core model stack
+      - key: HF_ENABLE_MODEL
+        value: "true"
+      - key: HF_ENABLE_GATE_MODEL
+        value: "true"
+      - key: HF_ENABLE_MULTILABEL_MODEL
+        value: "true"
+      - key: HF_ALLOW_DOWNLOAD
+        value: "true"
+      - key: HF_DEVICE
+        value: cpu
+      - key: HF_USE_QUANTIZATION
+        value: "false"
+      - key: HF_CACHE_DIR
+        value: /tmp/hf_cache
+      - key: TOXIC_GATE_MODEL_NAME
+        value: microsoft/mdeberta-v3-base
+      - key: TOXIC_GATE_THRESHOLD
+        value: "0.35"
+      - key: TOXIC_MULTILABEL_MODEL_NAME
+        value: xlm-roberta-large
+
+      # Optional context LLM escalation
+      - key: CONTEXT_LLM_ENABLED
+        value: "true"
+      - key: CONTEXT_LLM_ENDPOINT
+        fromService:
+          type: web
+          name: safeguard-ai-context-llm
+          property: url
+      - key: CONTEXT_LLM_MODEL
+        value: Qwen/Qwen2.5-7B-Instruct
+      - key: CONTEXT_LLM_TIMEOUT_MS
+        value: "3000"
+      - key: CONTEXT_ESCALATION_MIN_SCORE
+        value: "0.55"
+
+      # Cloudinary secrets
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+  - type: web
+    name: safeguard-ai-context-llm
+    runtime: python
+    runtimeVersion: 3.12.5
+    rootDir: context_service
+    autoDeploy: true
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: python -m uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: CONTEXT_SERVICE_MODE
+        value: auto
+      - key: UPSTREAM_CHAT_COMPLETIONS_URL
+        value: https://api.openai.com/v1/chat/completions
+      - key: UPSTREAM_API_KEY
+        sync: false
+      - key: UPSTREAM_API_KEY_HEADER
+        value: Authorization
+      - key: UPSTREAM_API_KEY_PREFIX
+        value: Bearer
+      - key: UPSTREAM_TIMEOUT_MS
+        value: "6000"
+
+  - type: web
+    name: safeguard-ai-frontend
+    runtime: node
+    runtimeVersion: 20
+    rootDir: frontend
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: safeguard-ai-backend
+          property: url
+      - key: NEXT_PUBLIC_API_TIMEOUT_MS
+        value: "180000"
+
+      # NextAuth / Google OAuth
+      - key: NEXTAUTH_URL
+        value: https://safeguard-ai-frontend.onrender.com
+      - key: NEXTAUTH_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+  - type: redis
+    name: safeguard-ai-redis
+    ipAllowList: []

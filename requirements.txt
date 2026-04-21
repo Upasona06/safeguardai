@@ -1,0 +1,55 @@
+fastapi>=0.100.0
+uvicorn[standard]>=0.25.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+motor>=3.0.0
+pymongo>=4.0.0
+redis>=5.0.0
+celery>=5.0.0
+requests>=2.30.0
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
+cloudinary>=1.40.0
+
+# Image Processing & OCR
+pillow>=10.0.0
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+easyocr>=1.6.0
+paddleocr>=3.0.0
+paddlepaddle>=3.0.0
+
+# NLP & ML - XLM-RoBERTa Stack (Production)
+transformers>=4.40.0
+torch>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+
+# Multilingual Support
+langdetect>=1.0.9
+regex>=2024.0.0
+
+# Explainability & Analysis
+shap>=0.44.0
+
+# Performance & Caching
+httpx>=0.27.0
+
+# Document Generation (FIR Reports)
+reportlab>=4.0.0
+pypdf>=4.1.0
+
+# Async & Concurrency
+aiofiles>=24.0.0
+
+# Testing & Monitoring
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+
+# Logging & Debugging
+structlog>=24.0.0
+
+# API Documentation & Validation
+email-validator>=2.0.0
+typing-extensions>=4.0.0

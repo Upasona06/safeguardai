@@ -1,0 +1,135 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════
+#  SafeGuard AI — Docker Compose
+#  Services: FastAPI backend, Next.js frontend,
+#            MongoDB, Redis, Celery worker
+# ══════════════════════════════════════════════════════════════
+
+services:
+
+  # ── MongoDB ──────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: safeguard_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: safeguard_ai
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    container_name: safeguard_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI Backend ───────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: safeguard_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - fir_pdfs:/tmp/fir_pdfs
+      - hf_cache:/tmp/hf_cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Celery Worker ─────────────────────────────────────────────
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: safeguard_celery
+    restart: unless-stopped
+    command: >
+      celery -A workers.celery_app worker
+      --loglevel=info
+      --concurrency=2
+      --queues=default
+    env_file: .env
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - fir_pdfs:/tmp/fir_pdfs
+      - hf_cache:/tmp/hf_cache
+
+  # ── Celery Flower (monitoring UI) ─────────────────────────────
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: safeguard_flower
+    restart: unless-stopped
+    command: >
+      celery -A workers.celery_app flower
+      --port=5555
+      --broker=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery_worker
+
+  # ── Next.js Frontend ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: safeguard_frontend
+    restart: unless-stopped
+    env_file: frontend/.env.local
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+# ── Named volumes ─────────────────────────────────────────────
+volumes:
+  mongo_data:
+  redis_data:
+  fir_pdfs:
+  hf_cache:

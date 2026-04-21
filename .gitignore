@@ -1,0 +1,29 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+.env.local
+.env.example
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Node/Next.js
+frontend/node_modules/
+frontend/.next/
+
+# ML Model cache (downloaded dynamically from HuggingFace)
+models/
+scripts/models/
+.cache/
+scripts/.cache/
+huggingface/
+
+# Misc
+.DS_Store
