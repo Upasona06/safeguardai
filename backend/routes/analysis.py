@@ -5,7 +5,7 @@ All heavy lifting is delegated to service layer.
 
 import asyncio
 import logging
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 
 from backend.models.schemas import (
@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _extract_user_scope(request: Request) -> tuple[str | None, str | None]:
+    user_id = (request.headers.get("x-user-id") or "").strip() or None
+    raw_email = (request.headers.get("x-user-email") or "").strip()
+    user_email = raw_email.lower() if raw_email else None
+    return user_id, user_email
+
+
 def get_analysis_service(db=Depends(get_db_optional)) -> AnalysisService:
     return AnalysisService(db)
 
@@ -29,6 +36,7 @@ def get_analysis_service(db=Depends(get_db_optional)) -> AnalysisService:
                                                                     
 @router.post("/analyze-text", response_model=AnalysisResponse)
 async def analyze_text(
+    request: Request,
     body: TextAnalysisRequest,
     service: AnalysisService = Depends(get_analysis_service),
 ):
@@ -38,7 +46,8 @@ async def analyze_text(
     """
     try:
         logger.info("Text analysis request: %d chars", len(body.text))
-        result = await service.analyze_text(body.text)
+        user_id, user_email = _extract_user_scope(request)
+        result = await service.analyze_text(body.text, user_id=user_id, user_email=user_email)
         return result
     except Exception as e:
         logger.exception("Text analysis failed")
@@ -48,6 +57,7 @@ async def analyze_text(
                                                                     
 @router.post("/analyze-image", response_model=AnalysisResponse)
 async def analyze_image(
+    request: Request,
     file: UploadFile = File(...),
     service: AnalysisService = Depends(get_analysis_service),
 ):
@@ -65,6 +75,7 @@ async def analyze_image(
     try:
         file_bytes = await file.read()
         logger.info("Image analysis: %s (%d bytes)", file.filename, len(file_bytes))
+        user_id, user_email = _extract_user_scope(request)
 
         cloudinary_service = CloudinaryService()
         upload_task = asyncio.create_task(cloudinary_service.upload_bytes(
@@ -73,7 +84,12 @@ async def analyze_image(
 
         try:
             # Run OCR + AI inference immediately; do not block on network upload first.
-            result = await service.analyze_image(file_bytes, image_url=None)
+            result = await service.analyze_image(
+                file_bytes,
+                image_url=None,
+                user_id=user_id,
+                user_email=user_email,
+            )
         except Exception:
             upload_task.cancel()
             raise
@@ -99,6 +115,7 @@ async def analyze_image(
                                                                     
 @router.post("/analyze-context", response_model=AnalysisResponse)
 async def analyze_context(
+    request: Request,
     body: ContextAnalysisRequest,
     service: AnalysisService = Depends(get_analysis_service),
 ):
@@ -108,7 +125,12 @@ async def analyze_context(
     """
     try:
         logger.info("Context analysis: %d messages", len(body.messages))
-        result = await service.analyze_context(body.messages)
+        user_id, user_email = _extract_user_scope(request)
+        result = await service.analyze_context(
+            body.messages,
+            user_id=user_id,
+            user_email=user_email,
+        )
         return result
     except Exception as e:
         logger.exception("Context analysis failed")

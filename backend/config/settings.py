@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     OCR_ENABLE_EASYOCR_FALLBACK: bool = True
     OCR_FALLBACK_TIME_BUDGET_SEC: float = 8.0
 
+    # Image-only harmful-content detection
+    IMAGE_ENABLE_SAFETY_MODEL: bool = True
+    IMAGE_SAFETY_MODEL_NAME: str = "Falconsai/nsfw_image_detection"
+    IMAGE_ENABLE_CLIP_ZEROSHOT: bool = False
+    IMAGE_CLIP_MODEL_NAME: str = "openai/clip-vit-base-patch32"
+
                                                                    
     FIR_OUTPUT_DIR: str = "/tmp/fir_pdfs"
 

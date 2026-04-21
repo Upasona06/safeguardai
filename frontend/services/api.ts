@@ -145,8 +145,10 @@ export async function getFIRHistory(
 
 export const firHistoryUpdatedEventName = FIR_HISTORY_UPDATED_EVENT;
 
-export async function fetchAnalytics() {
-  const { data } = await api.get("/analytics");
+export async function fetchAnalytics(user?: ApiUserContext) {
+  const { data } = await api.get("/analytics", {
+    headers: buildUserHeaders(user),
+  });
   return data;
 }
 

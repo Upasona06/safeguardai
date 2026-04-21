@@ -33,6 +33,7 @@ from ai_services.toxicity import ToxicityClassifier
 from ai_services.grooming_detection import GroomingDetector
 from ai_services.context_analysis import ContextAnalyzer
 from ai_services.multilingual_processing import MultilingualProcessor
+from ai_services.image_safety import ImageSafetyAnalyzer
 from backend.utils.legal_mapper import LegalMapper
 from backend.utils.risk_engine import RiskEngine
 from backend.utils.explainability import ExplainabilityEngine
@@ -62,6 +63,7 @@ _toxicity_clf: ToxicityClassifier | None = None
 _grooming_det: GroomingDetector | None = None
 _context_ana: ContextAnalyzer | None = None
 _multilingual: MultilingualProcessor | None = None
+_image_safety: ImageSafetyAnalyzer | None = None
 _legal_mapper = LegalMapper()
 _risk_engine = RiskEngine()
 _explainer: ExplainabilityEngine | None = None
@@ -102,13 +104,25 @@ def _get_explainer() -> ExplainabilityEngine:
     return _explainer
 
 
+def _get_image_safety() -> ImageSafetyAnalyzer:
+    global _image_safety
+    if _image_safety is None:
+        _image_safety = ImageSafetyAnalyzer()
+    return _image_safety
+
+
 class AnalysisService:
     def __init__(self, db):
         self.db = db
         self.cache = _get_redis()
 
                                                                     
-    async def analyze_text(self, text: str) -> AnalysisResponse:
+    async def analyze_text(
+        self,
+        text: str,
+        user_id: str | None = None,
+        user_email: str | None = None,
+    ) -> AnalysisResponse:
         """Analyze text with cache check (30% latency reduction on duplicates)."""
                            
         cache_key = self._get_cache_key(text)
@@ -134,7 +148,7 @@ class AnalysisService:
             except Exception as e:
                 logger.warning("Cache write failed: %s", e)
         
-        asyncio.create_task(self._persist_async(result))
+        asyncio.create_task(self._persist_async(result, user_id=user_id, user_email=user_email))
         return result
     
     @staticmethod
@@ -144,33 +158,85 @@ class AnalysisService:
         return f"analysis:text:{text_hash}"
 
                                                                     
-    async def analyze_image(self, image_bytes: bytes, image_url: str | None = None) -> AnalysisResponse:
+    async def analyze_image(
+        self,
+        image_bytes: bytes,
+        image_url: str | None = None,
+        user_id: str | None = None,
+        user_email: str | None = None,
+    ) -> AnalysisResponse:
         from backend.utils.ocr import extract_text_from_image
-        extracted_text = await asyncio.get_event_loop().run_in_executor(
-            None, extract_text_from_image, image_bytes
-        )
+
+        loop = asyncio.get_event_loop()
+        ocr_task = loop.run_in_executor(None, extract_text_from_image, image_bytes)
+        image_task = loop.run_in_executor(None, self._sync_analyze_image_only, image_bytes)
+
+        extracted_text, image_signal = await asyncio.gather(ocr_task, image_task)
         logger.info("OCR extracted %d chars for image", len(extracted_text.strip()))
-        if not extracted_text.strip():
-            raise ValueError(
-                "Unable to extract text from image. "
-                "Upload a clearer text image and ensure OCR dependencies are installed "
-                "(Tesseract binary plus easyocr/paddleocr optional fallbacks)."
+
+        if extracted_text.strip():
+            result = await loop.run_in_executor(
+                None, self._sync_analyze_text, extracted_text, image_url
             )
 
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, self._sync_analyze_text, extracted_text, image_url
+            fused_scores = _fuse_scores(result.labels.model_dump(), image_signal["scores"])
+            risk_level, overall_score = _risk_engine.compute(fused_scores)
+            legal_mappings = _legal_mapper.map(fused_scores, risk_level)
+
+            result.labels = CategoryScores(**{k: v for k, v in fused_scores.items() if k in CategoryScores.model_fields})
+            result.risk_level = risk_level
+            result.overall_score = overall_score
+            result.legal_mappings = legal_mappings
+
+            if image_signal["evidence"]:
+                result.explanation = (
+                    f"{result.explanation} "
+                    f"Visual safety signals were also considered ({', '.join(image_signal['evidence'][:3])})."
+                )
+
+            if image_url:
+                result.image_url = image_url
+
+            asyncio.create_task(self._persist_async(result, user_id=user_id, user_email=user_email))
+            return result
+
+        # OCR empty: return image-only safety assessment instead of 422.
+        image_scores = image_signal["scores"]
+        risk_level, overall_score = _risk_engine.compute(image_scores)
+        legal_mappings = _legal_mapper.map(image_scores, risk_level)
+        evidence = ", ".join(image_signal["evidence"][:3]) if image_signal["evidence"] else "no strong visual cues"
+
+        result = AnalysisResponse(
+            id=str(uuid.uuid4()),
+            risk_level=risk_level,
+            overall_score=overall_score,
+            labels=CategoryScores(**{k: v for k, v in image_scores.items() if k in CategoryScores.model_fields}),
+            toxic_tokens=[],
+            original_text="",
+            highlighted_text="No readable text detected in image. Applied image-only safety analysis.",
+            legal_mappings=legal_mappings,
+            explanation=(
+                "OCR could not extract readable text, so image-only harmful-content detection was applied. "
+                f"Visual evidence: {evidence}."
+            ),
+            timestamp=datetime.utcnow(),
+            language_detected="und",
+            image_url=image_url,
         )
-        if image_url:
-            result.image_url = image_url
-        asyncio.create_task(self._persist_async(result))
+        asyncio.create_task(self._persist_async(result, user_id=user_id, user_email=user_email))
         return result
 
                                                                     
-    async def analyze_context(self, messages: List[ConversationMessage]) -> AnalysisResponse:
+    async def analyze_context(
+        self,
+        messages: List[ConversationMessage],
+        user_id: str | None = None,
+        user_email: str | None = None,
+    ) -> AnalysisResponse:
         result = await asyncio.get_event_loop().run_in_executor(
             None, self._sync_analyze_context, messages
         )
-        asyncio.create_task(self._persist_async(result))
+        asyncio.create_task(self._persist_async(result, user_id=user_id, user_email=user_email))
         return result
 
                                                                     
@@ -266,15 +332,28 @@ class AnalysisService:
         )
         return result
 
-    async def _persist_async(self, result: AnalysisResponse) -> None:
+    async def _persist_async(
+        self,
+        result: AnalysisResponse,
+        user_id: str | None = None,
+        user_email: str | None = None,
+    ) -> None:
         """Best-effort MongoDB persistence on the active event loop."""
         if self.db is None:
             return
 
         try:
-            await self.db.analyses.insert_one(result.model_dump())
+            payload = result.model_dump()
+            payload["owner_user_id"] = (user_id or "").strip() or None
+            normalized_email = (user_email or "").strip().lower()
+            payload["owner_email"] = normalized_email or None
+            await self.db.analyses.insert_one(payload)
         except Exception as e:
             logger.warning("Persistence skipped: %s", e)
+
+    def _sync_analyze_image_only(self, image_bytes: bytes) -> dict:
+        analyzer = _get_image_safety()
+        return analyzer.analyze(image_bytes)
 
 
                                                                     
@@ -305,3 +384,11 @@ def _build_explanation(
         f"The model identified specific linguistic patterns associated with harm. "
         f"Review highlighted tokens for evidence details."
     )
+
+
+def _fuse_scores(text_scores: dict, image_scores: dict) -> dict:
+    merged = {}
+    keys = set(text_scores.keys()) | set(image_scores.keys())
+    for key in keys:
+        merged[key] = max(float(text_scores.get(key, 0.0)), float(image_scores.get(key, 0.0)))
+    return merged

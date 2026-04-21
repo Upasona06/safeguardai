@@ -11,6 +11,9 @@ interface Props {
 }
 
 export default function ImageAnalyzer({ onResult, onLoading }: Props) {
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -26,10 +29,16 @@ export default function ImageAnalyzer({ onResult, onLoading }: Props) {
   }, []);
 
   const handleFile = (f: File) => {
-    if (!f.type.startsWith("image/")) {
-      toast.error("Please upload an image file");
+    if (!ALLOWED_TYPES.includes(f.type)) {
+      toast.error("Unsupported file type. Use JPG, PNG, WEBP, or GIF.");
       return;
     }
+
+    if (f.size > MAX_IMAGE_BYTES) {
+      toast.error("Image is too large. Maximum allowed size is 10MB.");
+      return;
+    }
+
     setFile(f);
     setPreview(URL.createObjectURL(f));
   };
@@ -65,7 +74,11 @@ export default function ImageAnalyzer({ onResult, onLoading }: Props) {
         return;
       }
 
-      const message = err instanceof Error ? err.message : "Image analysis failed";
+      const rawMessage = err instanceof Error ? err.message : "Image analysis failed";
+      const message =
+        rawMessage.includes("Unable to extract text from image")
+          ? "No readable text detected. Upload a clearer screenshot with visible text, then retry."
+          : rawMessage;
       toast.error(message);
     } finally {
       if (!mountedRef.current || runId !== requestSeqRef.current) {

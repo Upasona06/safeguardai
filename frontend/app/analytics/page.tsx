@@ -21,7 +21,7 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     if (session?.user) {
-      fetchAnalytics()
+      fetchAnalytics(session.user)
         .then(setData)
         .catch(console.error)
         .finally(() => setLoading(false));
